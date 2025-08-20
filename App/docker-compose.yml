@@ -1,0 +1,41 @@
+services:
+  # Banco de dados MariaDB
+  mariadb:
+    image: mariadb:10.11
+    container_name: financas_mariadb
+    environment:
+      MYSQL_ROOT_PASSWORD: financas_root_2024
+      MYSQL_DATABASE: financas
+      MYSQL_USER: financas_user
+      MYSQL_PASSWORD: financas_pass_2024
+      MYSQL_ROOT_HOST: '%'
+    ports:
+      - "3306:3306"
+    volumes:
+      - mariadb_data:/var/lib/mysql
+      - ./backend/database.sql:/docker-entrypoint-initdb.d/01-init.sql
+      - ./init-db.sql:/docker-entrypoint-initdb.d/02-init-user.sql
+
+  # Aplicação
+  app:
+    build: .
+    container_name: financas_app
+    environment:
+      DB_HOST: mariadb
+      DB_USER: financas_user
+      DB_PASSWORD: financas_pass_2024
+      DB_NAME: financas
+      DB_PORT: 3306
+      JWT_SECRET: financas_jwt_secret_2024_super_secure
+      FRONTEND_URL: http://localhost:3000
+    ports:
+      - "3000:3000"
+      - "3001:3001"
+    volumes:
+      - ./backend:/app/backend
+      - ./frontend:/app/frontend
+    depends_on:
+      - mariadb
+
+volumes:
+  mariadb_data: 
