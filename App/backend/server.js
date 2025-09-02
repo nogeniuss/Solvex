@@ -13,7 +13,9 @@ const AutomatedNotificationService = require('./services/AutomatedNotificationSe
 const logger = require('./config/logger');
 
 // Importar middlewares
-const { generalLimiter, authLimiter, apiLimiter, speedLimiter } = require('./middleware/rateLimit');
+const { generalLimiter, loginLimiter, apiLimiter, speedLimiter } = require('./middleware/rateLimit');
+const { checkPaymentStatus } = require('./middleware/subscription');
+const cleanupService = require('./services/CleanupService');
 
 // Importar rotas
 const { router: authRoutes, authorizeRoles, authenticateToken } = require('./routes/auth');
@@ -41,6 +43,11 @@ const exportCsvRoutes = require('./routes/export');
 const planningRoutes = require('./routes/planning');
 const pdfRoutes = require('./routes/pdf');
 const externalRoutes = require('./routes/external');
+const plansRoutes = require('./routes/plans');
+const stripeRoutes = require('./routes/stripe');
+
+// Importar função de migração
+const SimpleMigrationRunner = require('./migrations/migration-runner-simple');
 
 // Carregar variáveis de ambiente
 dotenv.config();
@@ -83,7 +90,7 @@ app.use(morgan('combined', {
 
 // Rate limiting
 app.use(generalLimiter);
-app.use('/api/auth', authLimiter);
+// app.use('/api/auth/login', loginLimiter); // Removido para evitar duplicação
 app.use('/api', apiLimiter);
 app.use(speedLimiter);
 
@@ -95,30 +102,19 @@ app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 app.use(captureSession);
 app.use(captureBarriers());
 
-// Middleware de auditoria
-app.use((req, res, next) => {
-  const start = Date.now();
-  
-  res.on('finish', () => {
-    const duration = Date.now() - start;
-    logger.audit('api_request', req.user?.id, {
-      ip: req.ip,
-      userAgent: req.get('User-Agent'),
-      resource: req.path,
-      method: req.method,
-      status: res.statusCode,
-      duration
-    });
-  });
-  
-  next();
-});
-
-// Rotas
+// Rotas públicas primeiro
 app.use('/api/auth', authRoutes);
-app.use('/api/stripe', require('./routes/stripe'));
+app.use('/api/stripe', stripeRoutes);
 app.use('/api/payment', require('./routes/payment'));
-app.use('/api/plans', require('./routes/plans'));
+app.use('/api/plans', plansRoutes);
+
+// Depois middleware de autenticação
+app.use(authenticateToken);
+
+// Middleware de verificação de pagamento
+app.use(checkPaymentStatus);
+
+// Rotas protegidas
 app.use('/api/migrations', require('./routes/migrations'));
 app.use('/api/categorias', categoriasRoutes);
 app.use('/api/despesas', despesasRoutes);
@@ -185,10 +181,19 @@ app.use('*', (req, res) => {
   res.status(404).json({ error: 'Rota não encontrada' });
 });
 
-// Inicializar servidor
-app.listen(PORT, () => {
-  logger.info(`🚀 Servidor rodando na porta ${PORT}`);
-  logger.info(`📊 Ambiente: ${process.env.NODE_ENV || 'development'}`);
+// Função de inicialização
+async function initializeServer() {
+  try {
+    // Executar migrations
+    logger.info('🔄 Executando migrations...');
+    const migrationRunner = new SimpleMigrationRunner();
+    await migrationRunner.runPendingMigrations();
+    logger.info('✅ Migrations executadas com sucesso!');
+    
+    // Inicializar servidor
+    app.listen(PORT, () => {
+      logger.info(`🚀 Servidor rodando na porta ${PORT}`);
+      logger.info(`📊 Ambiente: ${process.env.NODE_ENV || 'development'}`);
   
   // Inicializar sistema de notificações
   const notificationScheduler = new NotificationScheduler();
@@ -202,20 +207,31 @@ app.listen(PORT, () => {
   });
   
   // Inicializar sistema de alertas
-  const alertService = new AlertService();
+  // const alertService = new AlertService();
   
   // Executar verificação de alertas a cada 6 horas
-  setInterval(() => {
-    alertService.runAlertCheck();
-  }, 6 * 60 * 60 * 1000);
+  // setInterval(() => {
+  //   alertService.runAlertCheck();
+  // }, 6 * 60 * 60 * 1000);
   
   // Executar primeira verificação após 5 minutos
-  setTimeout(() => {
-    alertService.runAlertCheck();
-  }, 5 * 60 * 1000);
+  // setTimeout(() => {
+  //   alertService.runAlertCheck();
+  // }, 5 * 60 * 1000);
 
-  logger.info('✅ Sistema inicializado com sucesso!');
-});
+  // Iniciar serviço de limpeza automática
+  cleanupService.startAutomaticCleanup();
+
+      logger.info('✅ Sistema inicializado com sucesso!');
+    });
+  } catch (error) {
+    logger.error('❌ Erro ao inicializar servidor:', error);
+    process.exit(1);
+  }
+}
+
+// Inicializar servidor
+initializeServer();
 
 // Graceful shutdown
 process.on('SIGTERM', () => {

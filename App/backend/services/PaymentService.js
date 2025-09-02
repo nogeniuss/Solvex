@@ -1,4 +1,4 @@
-const { query } = require('../database');
+const db = require('../database');
 const logger = require('../config/logger');
 
 class PaymentService {
@@ -26,7 +26,7 @@ class PaymentService {
       const { planId, paymentMethod, gateway = 'stripe' } = planData;
       
       // Verificar se o usuário já tem uma assinatura ativa
-      const existingSubscription = await queryOne(`
+      const existingSubscription = await db.queryOne(`
         SELECT * FROM subscriptions 
         WHERE user_id = ? AND status = 'ativa'
       `, [userId]);
@@ -52,7 +52,7 @@ class PaymentService {
       }
 
       // Salvar assinatura no banco
-      const result = await query(`
+      const result = await db.query(`
         INSERT INTO subscriptions (
           user_id, plan_id, gateway, gateway_subscription_id, 
           status, valor, data_inicio, data_proximo_pagamento
@@ -76,7 +76,7 @@ class PaymentService {
     
     try {
       // Criar ou recuperar cliente
-      const user = await queryOne('SELECT email, nome FROM users WHERE id = ?', [userId]);
+      const user = await db.queryOne('SELECT email, nome FROM users WHERE id = ?', [userId]);
       
       let customer = await stripe.customers.list({ email: user.email, limit: 1 });
       if (customer.data.length === 0) {
@@ -159,7 +159,7 @@ class PaymentService {
       const mercadopago = require('mercadopago');
       mercadopago.configure({ access_token: this.gateways.mercadopago.accessToken });
 
-      const user = await queryOne('SELECT email, nome FROM users WHERE id = ?', [userId]);
+      const user = await db.queryOne('SELECT email, nome FROM users WHERE id = ?', [userId]);
 
       const preference = {
         items: [{
@@ -196,7 +196,7 @@ class PaymentService {
 
   async cancelSubscription(subscriptionId, userId) {
     try {
-      const subscription = await queryOne(`
+      const subscription = await db.queryOne(`
         SELECT * FROM subscriptions 
         WHERE id = ? AND user_id = ?
       `, [subscriptionId, userId]);
@@ -219,7 +219,7 @@ class PaymentService {
       }
 
       // Atualizar no banco
-      await query(`
+      await db.query(`
         UPDATE subscriptions SET 
           status = 'cancelada',
           data_cancelamento = NOW(),
@@ -318,7 +318,7 @@ class PaymentService {
 
   async handleSuccessfulPayment(invoice) {
     // Atualizar status da assinatura
-    await query(`
+    await db.query(`
       UPDATE subscriptions SET 
         status = 'ativa',
         data_ultimo_pagamento = NOW(),
@@ -328,7 +328,7 @@ class PaymentService {
     `, [invoice.subscription]);
 
     // Registrar pagamento
-    await query(`
+    await db.query(`
       INSERT INTO payments (
         subscription_id, gateway, gateway_payment_id, valor, status, data_pagamento
       ) VALUES (?, 'stripe', ?, ?, 'pago', NOW())
@@ -337,7 +337,7 @@ class PaymentService {
 
   async handleFailedPayment(invoice) {
     // Marcar assinatura como com pagamento pendente
-    await query(`
+    await db.query(`
       UPDATE subscriptions SET 
         status = 'pagamento_pendente',
         updated_date = NOW()
@@ -347,7 +347,7 @@ class PaymentService {
 
   async handleSubscriptionCancelled(subscription) {
     // Marcar assinatura como cancelada
-    await query(`
+    await db.query(`
       UPDATE subscriptions SET 
         status = 'cancelada',
         data_cancelamento = NOW(),
@@ -409,7 +409,7 @@ class PaymentService {
   }
 
   async getUserSubscription(userId) {
-    return await queryOne(`
+    return await db.queryOne(`
       SELECT 
         s.*,
         p.nome as plan_name,
@@ -423,7 +423,7 @@ class PaymentService {
   }
 
   async getPaymentHistory(userId) {
-    return await query(`
+    return await db.query(`
       SELECT 
         p.*,
         s.plan_id,
@@ -440,39 +440,51 @@ class PaymentService {
    * Marcar usuário como pago
    */
   async markUserAsPaid(userId) {
+    let connection;
     try {
+      connection = await db.getConnection();
+      await connection.beginTransaction();
+
       // Atualizar status da subscription do usuário
-      await query(
+      await connection.query(
         'UPDATE users SET subscription_status = ?, subscription_ends_at = DATE_ADD(NOW(), INTERVAL 1 MONTH), updated_at = NOW() WHERE id = ?',
         ['active', userId]
       );
 
       // Criar ou atualizar registro de subscription
-      const existingSubscription = await query(
+      const [existingSubscriptions] = await connection.query(
         'SELECT id FROM user_subscriptions WHERE user_id = ?',
         [userId]
       );
 
-      if (existingSubscription.length > 0) {
+      if (existingSubscriptions.length > 0) {
         // Atualizar existente
-        await query(
+        await connection.query(
           'UPDATE user_subscriptions SET status = ?, current_period_start = NOW(), current_period_end = DATE_ADD(NOW(), INTERVAL 1 MONTH), updated_at = NOW() WHERE user_id = ?',
           ['active', userId]
         );
       } else {
         // Criar novo
-        await query(
+        await connection.query(
           'INSERT INTO user_subscriptions (user_id, status, current_period_start, current_period_end, created_at, updated_at) VALUES (?, ?, NOW(), DATE_ADD(NOW(), INTERVAL 1 MONTH), NOW(), NOW())',
           [userId, 'active']
         );
       }
 
+      await connection.commit();
       logger.info(`Usuário ${userId} marcado como pago com sucesso`);
       return true;
 
     } catch (error) {
+      if (connection) {
+        await connection.rollback();
+      }
       logger.error('Erro ao marcar usuário como pago:', error);
       throw error;
+    } finally {
+      if (connection) {
+        connection.release();
+      }
     }
   }
 
@@ -480,17 +492,19 @@ class PaymentService {
    * Verificar se usuário está pago
    */
   async isUserPaid(userId) {
+    let connection;
     try {
-      const result = await query(
+      connection = await db.getConnection();
+      const [rows] = await connection.query(
         'SELECT subscription_status, subscription_ends_at FROM users WHERE id = ?',
         [userId]
       );
 
-      if (result.length === 0) {
+      if (rows.length === 0) {
         return false;
       }
 
-      const user = result[0];
+      const user = rows[0];
       const now = new Date();
       const endsAt = user.subscription_ends_at ? new Date(user.subscription_ends_at) : null;
 
@@ -500,6 +514,10 @@ class PaymentService {
     } catch (error) {
       logger.error('Erro ao verificar se usuário está pago:', error);
       return false;
+    } finally {
+      if (connection) {
+        connection.release();
+      }
     }
   }
 
@@ -511,7 +529,7 @@ class PaymentService {
       await this.markUserAsPaid(userId);
       
       // Registrar na tabela de histórico de pagamentos
-      await query(
+      await db.query(
         'INSERT INTO payment_history (user_id, amount, currency, status, description, created_at) VALUES (?, ?, ?, ?, ?, NOW())',
         [userId, 20.00, 'BRL', 'succeeded', 'Pagamento simulado - Plano Mensal']
       );

@@ -1,0 +1,44 @@
+# Node.js
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+package-lock.json
+.pnpm-debug.log*
+
+# Env files
+*.env
+.env
+.env.*
+**/*.env    # <- Adiciona arquivos .env em subpastas
+**/.env*    # <- Garante que .env.* também sejam ignorados em qualquer pasta
+
+# Build outputs
+dist/
+build/
+.out/
+.next/
+.cache/
+
+# OS-specific
+.DS_Store
+Thumbs.db
+
+# Logs
+logs/
+*.log
+*.log.*
+
+# Chrome/puppeteer
+**/puppeteer*/.local-chromium/
+
+# Editor/IDE configs
+.vscode/
+.idea/
+*.sublime-workspace
+*.sublime-project
+
+# Misc
+*.tgz
+*.swp
+*.bak

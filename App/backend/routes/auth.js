@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const jwt = require('jsonwebtoken');
 const AuthController = require('../controllers/AuthController');
+const { loginLimiter } = require('../middleware/rateLimit');
 
 // Middleware de autenticação
 const authenticateToken = (req, res, next) => {
@@ -36,7 +37,7 @@ const authorizeRoles = (...allowedRoles) => {
 
 // Rotas públicas
 router.post('/register', AuthController.register);
-router.post('/login', AuthController.login);
+router.post('/login', loginLimiter, AuthController.login);
 router.post('/forgot-password', AuthController.forgotPassword);
 router.post('/reset-password', AuthController.resetPassword);
 

@@ -1,6 +1,6 @@
 const fs = require('fs');
 const path = require('path');
-const { query } = require('../database');
+const db = require('../database');
 
 class SimpleMigrationRunner {
   constructor() {
@@ -17,7 +17,7 @@ class SimpleMigrationRunner {
    */
   async initMigrationsTable() {
     try {
-      await query(`
+      await db.query(`
         CREATE TABLE IF NOT EXISTS ${this.migrationsTable} (
           id INT AUTO_INCREMENT PRIMARY KEY,
           migration_name VARCHAR(255) NOT NULL UNIQUE,
@@ -37,7 +37,7 @@ class SimpleMigrationRunner {
    */
   async getExecutedMigrations() {
     try {
-      const result = await query(`SELECT migration_name FROM ${this.migrationsTable} ORDER BY executed_at`);
+      const result = await db.query(`SELECT migration_name FROM ${this.migrationsTable} ORDER BY executed_at`);
       return result.map(row => row.migration_name);
     } catch (error) {
       this.log('Erro ao buscar migrations executadas: ' + error.message);
@@ -78,15 +78,23 @@ class SimpleMigrationRunner {
       
       for (const statement of statements) {
         if (statement.trim()) {
-          await query(statement);
+          await db.query(statement);
         }
       }
 
-      // Registrar migration como executada
-      await query(
-        `INSERT INTO ${this.migrationsTable} (migration_name) VALUES (?)`,
-        [migrationFile]
-      );
+      // Registrar migration como executada (ignorar se já existe)
+      try {
+        await db.query(
+          `INSERT INTO ${this.migrationsTable} (migration_name) VALUES (?)`,
+          [migrationFile]
+        );
+      } catch (error) {
+        if (error.code === 'ER_DUP_ENTRY') {
+          this.log(`Migration ${migrationFile} já foi executada anteriormente`);
+        } else {
+          throw error;
+        }
+      }
 
       this.log(`Migration ${migrationFile} executada com sucesso`);
       return true;
@@ -120,8 +128,13 @@ class SimpleMigrationRunner {
 
       const executedMigrationsList = [];
       for (const migration of pendingMigrations) {
-        await this.executeMigration(migration);
-        executedMigrationsList.push(migration);
+        try {
+          await this.executeMigration(migration);
+          executedMigrationsList.push(migration);
+        } catch (error) {
+          this.log(`⚠️ Erro na migration ${migration}, continuando...`);
+          // Continuar com as próximas migrations mesmo se uma falhar
+        }
       }
 
       this.log(`${executedMigrationsList.length} migrations executadas com sucesso`);

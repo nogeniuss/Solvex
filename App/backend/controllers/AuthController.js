@@ -1,154 +1,223 @@
 const UserService = require('../services/UserService');
 const EmailService = require('../services/EmailService');
 const StripeService = require('../services/StripeService');
+const jwt = require('jsonwebtoken');
+const bcrypt = require('bcrypt');
+const db = require('../database');
+const logger = require('../config/logger');
 
 class AuthController {
   async register(req, res) {
+    let connection;
     try {
-      const { nome, email, telefone, senha } = req.body;
+      const { nome, email, senha, telefone } = req.body;
 
       // Validações básicas
-      if (!nome || !email || !telefone || !senha) {
-        return res.status(400).json({ 
-          error: 'Todos os campos são obrigatórios' 
-        });
+      if (!nome || !email || !senha || !telefone) {
+        return res.status(400).json({ error: 'Todos os campos são obrigatórios' });
       }
 
-      if (senha.length < 6) {
-        return res.status(400).json({ 
-          error: 'A senha deve ter pelo menos 6 caracteres' 
-        });
+      connection = await db.getConnection();
+      await connection.beginTransaction();
+
+      // Verificar se usuário já existe
+      const [existingUsers] = await connection.query(
+        'SELECT id FROM users WHERE email = ?',
+        [email]
+      );
+
+      if (existingUsers.length > 0) {
+        await connection.rollback();
+        return res.status(400).json({ error: 'E-mail já cadastrado' });
       }
 
-      const user = await UserService.createUser({ nome, email, telefone, senha, subscription_status: 'incomplete' });
-      
+      // Hash da senha
+      const hashedPassword = await bcrypt.hash(senha, 10);
+
+      // Inserir usuário
+      const [result] = await connection.query(
+        `INSERT INTO users (nome, email, senha, telefone, payment_status, created_at, updated_at)
+         VALUES (?, ?, ?, ?, 'pending', NOW(), NOW())`,
+        [nome, email, hashedPassword, telefone]
+      );
+
+      // Gerar token JWT
+      const token = jwt.sign(
+        { 
+          id: result.insertId,
+          userId: result.insertId,
+          email: email,
+          nome: nome
+        },
+        process.env.JWT_SECRET || 'sua_chave_secreta',
+        { expiresIn: '24h' }
+      );
+
+      await connection.commit();
+
+      // Retornar token e dados do usuário
       res.status(201).json({
         message: 'Usuário criado com sucesso',
+        token,
         user: {
-          id: user.id,
-          nome: user.nome,
-          email: user.email,
-          telefone: user.telefone,
-          status: user.status,
-          subscription_status: user.subscription_status || 'incomplete'
-        },
-        requiresPayment: true,
-        isNewUser: true
+          id: result.insertId,
+          nome,
+          email,
+          telefone,
+          payment_status: 'pending'
+        }
       });
+
+      logger.info('✅ Novo usuário registrado:', { userId: result.insertId, email });
+
     } catch (error) {
-      console.error('Erro no registro:', error);
-      
-      if (error.message === 'Email já cadastrado' || error.message === 'Telefone já cadastrado') {
-        return res.status(409).json({ error: error.message });
+      if (connection) {
+        await connection.rollback();
       }
-      
-      res.status(500).json({ 
-        error: 'Erro interno do servidor' 
-      });
+      logger.error('❌ Erro no registro:', error);
+      res.status(500).json({ error: 'Erro ao criar usuário' });
+    } finally {
+      if (connection) {
+        connection.release();
+      }
     }
   }
 
   async login(req, res) {
+    let connection;
     try {
-      const { email, telefone, senha } = req.body;
+      const { email, senha } = req.body;
 
       // Validações básicas
-      if ((!email && !telefone) || !senha) {
-        return res.status(400).json({ 
-          error: 'Email ou telefone e senha são obrigatórios' 
-        });
+      if (!email || !senha) {
+        return res.status(400).json({ error: 'Email e senha são obrigatórios' });
       }
 
-      const emailOrPhone = email || telefone;
-      const result = await UserService.authenticateUser(emailOrPhone, senha);
-      
-      // Para login simples, por enquanto não verificar subscription
-      // (deixar para depois conforme solicitado)
-      res.json({
-        message: 'Login realizado com sucesso',
-        user: result.user,
-        token: result.token,
-        requiresPayment: false // Temporariamente desabilitado para login
-      });
-    } catch (error) {
-      console.error('Erro no login:', error);
-      
-      if (error.message.includes('bloqueado')) {
-        return res.status(403).json({ error: error.message });
-      }
-      
-      if (error.message.includes('Senha incorreta')) {
-        return res.status(401).json({ error: error.message });
-      }
-      
-      if (error.message === 'Usuário não encontrado') {
+      connection = await db.getConnection();
+
+      // Buscar usuário
+      const [users] = await connection.query(
+        'SELECT * FROM users WHERE email = ?',
+        [email]
+      );
+
+      const user = users[0];
+      if (!user) {
         return res.status(401).json({ error: 'Credenciais inválidas' });
       }
-      
-      res.status(500).json({ 
-        error: 'Erro interno do servidor' 
-      });
-    }
-  }
 
-  async getProfile(req, res) {
-    try {
-      const user = await UserService.getUserById(req.user.id);
-      
-      if (!user) {
-        return res.status(404).json({ error: 'Usuário não encontrado' });
+      // Verificar senha
+      const isValidPassword = await bcrypt.compare(senha, user.senha);
+      if (!isValidPassword) {
+        return res.status(401).json({ error: 'Credenciais inválidas' });
       }
 
+      // Gerar token JWT
+      const token = jwt.sign(
+        { id: user.id, userId: user.id, email: user.email },
+        process.env.JWT_SECRET || 'sua_chave_secreta',
+        { expiresIn: '24h' }
+      );
+
       res.json({
+        token,
         user: {
           id: user.id,
           nome: user.nome,
           email: user.email,
           telefone: user.telefone,
-          status: user.status,
-          role: user.role,
-          created_date: user.created_date,
-          last_login: user.last_login
+          payment_status: user.payment_status
         }
       });
+
     } catch (error) {
-      console.error('Erro ao buscar perfil:', error);
-      res.status(500).json({ 
-        error: 'Erro interno do servidor' 
-      });
+      logger.error('❌ Erro no login:', error);
+      res.status(500).json({ error: 'Erro interno do servidor' });
+    } finally {
+      if (connection) {
+        connection.release();
+      }
+    }
+  }
+
+  async getProfile(req, res) {
+    let connection;
+    try {
+      const userId = req.user.userId || req.user.id; // Support both formats
+
+      connection = await db.getConnection();
+      const [users] = await connection.query(
+        'SELECT id, nome, email, telefone, payment_status FROM users WHERE id = ?',
+        [userId]
+      );
+
+      const user = users[0];
+      if (!user) {
+        return res.status(404).json({ error: 'Usuário não encontrado' });
+      }
+
+      res.json({ user });
+
+    } catch (error) {
+      logger.error('❌ Erro ao buscar perfil:', error);
+      res.status(500).json({ error: 'Erro interno do servidor' });
+    } finally {
+      if (connection) {
+        connection.release();
+      }
     }
   }
 
   async updateProfile(req, res) {
+    let connection;
     try {
+      const userId = req.user.userId;
       const { nome, email, telefone } = req.body;
-      const userId = req.user.id;
 
-      // Validações básicas
-      if (!nome || !email || !telefone) {
-        return res.status(400).json({ 
-          error: 'Nome, email e telefone são obrigatórios' 
-        });
+      connection = await db.getConnection();
+      await connection.beginTransaction();
+
+      // Verificar se email já existe
+      if (email) {
+        const [existingUsers] = await connection.query(
+          'SELECT id FROM users WHERE email = ? AND id != ?',
+          [email, userId]
+        );
+
+        if (existingUsers.length > 0) {
+          await connection.rollback();
+          return res.status(400).json({ error: 'E-mail já está em uso' });
+        }
       }
 
-      const updatedUser = await UserService.updateUser(userId, { nome, email, telefone });
-      
-      res.json({
-        message: 'Perfil atualizado com sucesso',
-        user: {
-          id: updatedUser.id,
-          nome: updatedUser.nome,
-          email: updatedUser.email,
-          telefone: updatedUser.telefone,
-          status: updatedUser.status,
-          role: updatedUser.role
-        }
-      });
+      // Atualizar usuário
+      await connection.query(
+        `UPDATE users 
+         SET nome = ?, email = ?, telefone = ?, updated_at = NOW()
+         WHERE id = ?`,
+        [nome, email, telefone, userId]
+      );
+
+      await connection.commit();
+
+      // Buscar usuário atualizado
+      const [users] = await connection.query(
+        'SELECT id, nome, email, telefone, payment_status FROM users WHERE id = ?',
+        [userId]
+      );
+
+      res.json({ user: users[0] });
+
     } catch (error) {
-      console.error('Erro ao atualizar perfil:', error);
-      res.status(500).json({ 
-        error: 'Erro interno do servidor' 
-      });
+      if (connection) {
+        await connection.rollback();
+      }
+      logger.error('❌ Erro ao atualizar perfil:', error);
+      res.status(500).json({ error: 'Erro interno do servidor' });
+    } finally {
+      if (connection) {
+        connection.release();
+      }
     }
   }
 

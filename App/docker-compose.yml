@@ -1,41 +1,64 @@
 services:
-  # Banco de dados MariaDB
   mariadb:
-    image: mariadb:10.11
+    image: mariadb:latest
     container_name: financas_mariadb
     environment:
-      MYSQL_ROOT_PASSWORD: financas_root_2024
+      MYSQL_ROOT_PASSWORD: root_password_2024
       MYSQL_DATABASE: financas
       MYSQL_USER: financas_user
       MYSQL_PASSWORD: financas_pass_2024
-      MYSQL_ROOT_HOST: '%'
+      MARIADB_AUTO_UPGRADE: "1"
     ports:
       - "3306:3306"
     volumes:
       - mariadb_data:/var/lib/mysql
-      - ./backend/database.sql:/docker-entrypoint-initdb.d/01-init.sql
-      - ./init-db.sql:/docker-entrypoint-initdb.d/02-init-user.sql
+    command: 
+      - --max_connections=1000
+      - --wait_timeout=28800
+      - --interactive_timeout=28800
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-proot_password_2024"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+      start_period: 60s
+    restart: always
+    networks:
+      - app_network
 
-  # Aplicação
   app:
     build: .
     container_name: financas_app
     environment:
-      DB_HOST: mariadb
-      DB_USER: financas_user
-      DB_PASSWORD: financas_pass_2024
-      DB_NAME: financas
-      DB_PORT: 3306
-      JWT_SECRET: financas_jwt_secret_2024_super_secure
-      FRONTEND_URL: http://localhost:3000
+      - NODE_ENV=development
+      - PORT=3001
+      - DB_HOST=mariadb
+      - DB_USER=financas_user
+      - DB_PASSWORD=financas_pass_2024
+      - DB_NAME=financas
+      - DB_PORT=3306
+      - JWT_SECRET=seu_jwt_secret_2024
+      - FRONTEND_URL=http://localhost:3000
+      - STRIPE_BACKEND=sk_test_51PsXhrGhjpYUfyObUQabVwOxMUXZdOzb7hwqvgRfhYvovQQVMkUsQ06rFowfLeaNmrWLhop9I7pD7yieM1AVXfLG00aW7aIviw
+      - STRIPE_FRONTEND=pk_test_51PsXhrGhjpYUfyObXra74Y0C3QnLlb0VShey2PAw8SzieNsjgqhUk1FAZAtmfKSHXurXPvoBozIFxf7kL27jp1Yt00OXBw0l5L
     ports:
       - "3000:3000"
       - "3001:3001"
     volumes:
       - ./backend:/app/backend
       - ./frontend:/app/frontend
+      - /app/backend/node_modules
+      - /app/frontend/node_modules
     depends_on:
-      - mariadb
+      mariadb:
+        condition: service_healthy
+    restart: always
+    networks:
+      - app_network
+
+networks:
+  app_network:
+    driver: bridge
 
 volumes:
   mariadb_data: 

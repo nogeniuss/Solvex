@@ -1,82 +1,74 @@
 const mysql = require('mysql2/promise');
-require('dotenv').config();
+const logger = require('./config/logger');
 
-// Configuração da conexão com MariaDB
-const dbConfig = {
-  host: process.env.DB_HOST || 'localhost',
-  user: process.env.DB_USER || 'root',
-  password: process.env.DB_PASSWORD || '',
+const pool = mysql.createPool({
+  host: process.env.DB_HOST || 'mariadb',
+  user: process.env.DB_USER || 'financas_user',
+  password: process.env.DB_PASSWORD || 'financas_pass_2024',
   database: process.env.DB_NAME || 'financas',
   port: process.env.DB_PORT || 3306,
   waitForConnections: true,
   connectionLimit: 10,
-  queueLimit: 0
-};
+  queueLimit: 0,
+  enableKeepAlive: true,
+  keepAliveInitialDelay: 0,
+  connectTimeout: 10000,
+  acquireTimeout: 10000,
+  timeout: 10000
+});
 
-// Criar pool de conexões
-const pool = mysql.createPool(dbConfig);
-
-// Função para inicializar o banco de dados
-async function initializeDatabase() {
-  try {
-    // Testar conexão
-    const connection = await pool.getConnection();
-    console.log('Conectado ao MariaDB com sucesso!');
-    connection.release();
-
-    // Verificar se a tabela users existe
-    const [tables] = await pool.execute('SHOW TABLES LIKE "users"');
-    if (tables.length > 0) {
-      console.log('Tabela users encontrada');
-    } else {
-      console.log('Tabela users não encontrada - usando tabela existente');
+// Função para tentar conexão com retry
+async function connectWithRetry(retries = 5, delay = 5000) {
+  for (let i = 0; i < retries; i++) {
+    try {
+      const connection = await pool.getConnection();
+      logger.info('✅ Conectado ao MariaDB com sucesso!');
+      connection.release();
+      return;
+    } catch (err) {
+      if (i === retries - 1) {
+        logger.error('❌ Erro ao conectar ao MariaDB:', err);
+        process.exit(1);
+      }
+      logger.warn(`⚠️ Tentativa ${i + 1} de ${retries} falhou, tentando novamente em ${delay/1000}s...`);
+      await new Promise(resolve => setTimeout(resolve, delay));
     }
-
-  } catch (error) {
-    console.error('Erro ao inicializar banco de dados:', error);
-    throw error;
   }
 }
 
-// Função para executar queries
+// Funções auxiliares para queries
 async function query(sql, params) {
+  const connection = await pool.getConnection();
   try {
-    const [rows] = await pool.execute(sql, params);
+    const [rows] = await connection.query(sql, params);
     return rows;
-  } catch (error) {
-    console.error('Erro na query:', error);
-    throw error;
+  } finally {
+    connection.release();
   }
 }
 
-// Função para executar queries que retornam apenas uma linha
 async function queryOne(sql, params) {
-  try {
-    const [rows] = await pool.execute(sql, params);
-    return rows[0];
-  } catch (error) {
-    console.error('Erro na query:', error);
-    throw error;
-  }
+  const rows = await query(sql, params);
+  return rows[0];
 }
 
-// Função para executar queries de inserção/atualização
 async function execute(sql, params) {
+  const connection = await pool.getConnection();
   try {
-    const [result] = await pool.execute(sql, params);
+    const [result] = await connection.execute(sql, params);
     return result;
-  } catch (error) {
-    console.error('Erro na execução:', error);
-    throw error;
+  } finally {
+    connection.release();
   }
 }
 
-// Inicializar banco de dados quando o módulo for carregado
-initializeDatabase().catch(console.error);
+// Iniciar conexão com retry
+connectWithRetry();
 
 module.exports = {
   pool,
   query,
   queryOne,
-  execute
+  execute,
+  getConnection: () => pool.getConnection()
 }; 

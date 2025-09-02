@@ -1,324 +1,224 @@
 import React, { useState } from 'react';
 import {
-  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
-  PieChart, Pie, Cell, LineChart, Line, AreaChart, Area, RadarChart, PolarGrid,
-  PolarAngleAxis, PolarRadiusAxis, Radar, ComposedChart, ScatterChart, Scatter
+  LineChart,
+  Line,
+  BarChart,
+  Bar,
+  PieChart,
+  Pie,
+  AreaChart,
+  Area,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  Legend,
+  ResponsiveContainer,
+  Cell
 } from 'recharts';
-import PROFESSIONAL_COLORS from '../utils/colors';
+import './ChartViewer.css';
 
-const ChartViewer = ({ 
-  data, 
-  title, 
-  subtitle, 
-  chartTypes = ['bar', 'line', 'pie', 'area'], 
-  defaultType = 'bar',
-  height = 300,
-  colors = PROFESSIONAL_COLORS,
+const ChartViewer = ({
+  data,
+  chartTypes = ['line', 'bar', 'area', 'pie'],
+  defaultType = 'line',
+  title,
+  subtitle,
+  height = 350,
   formatValue = (value) => value,
   xAxisKey = 'name',
   yAxisKey = 'value',
-  yDomain = undefined,
   multiSeries = false,
-  seriesKeys = []
+  seriesKeys = [],
+  colors = ['#4a90e2', '#50c878', '#f44336', '#ffa726', '#9c27b0', '#ff9800']
 }) => {
-  const [activeChartType, setActiveChartType] = useState(defaultType);
-  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [chartType, setChartType] = useState(defaultType);
+  const [showLegend, setShowLegend] = useState(true);
+  const [showGrid, setShowGrid] = useState(true);
+  const [showTooltip, setShowTooltip] = useState(true);
 
-  const formatSeriesName = (key) => {
-    const nameMap = {
-      'receitas': 'Receitas',
-      'despesas': 'Despesas', 
-      'saldo': 'Saldo',
-      'value': 'Valor',
-      'total': 'Total'
+  const getChartTypeLabel = (type) => {
+    const labels = {
+      line: 'Linha',
+      bar: 'Barra',
+      area: 'Área',
+      pie: 'Pizza'
     };
-    return nameMap[key] || key.charAt(0).toUpperCase() + key.slice(1);
+    return labels[type] || type;
   };
 
-  const chartTypeLabels = {
-    bar: 'Barras',
-    line: 'Linha',
-    pie: 'Pizza',
-    area: 'Área',
-    radar: 'Radar',
-    scatter: 'Dispersão'
-  };
-
-  const renderChart = (fullscreenHeight = height) => {
-    if (!data || data.length === 0) {
-      return (
-        <div className="chart-placeholder">
-          <div className="chart-placeholder-icon">📊</div>
-          <p>Nenhum dado disponível para exibir</p>
-        </div>
-      );
-    }
-
-    const commonProps = {
-      data,
-      height: fullscreenHeight
-    };
-
-    switch (activeChartType) {
-      case 'bar':
-        return (
-          <ResponsiveContainer width="100%" height={fullscreenHeight}>
-            <BarChart {...commonProps}>
-              <CartesianGrid strokeDasharray="3 3" />
-              <XAxis dataKey={xAxisKey} />
-              <YAxis domain={yDomain || ['auto', 'auto']} tickFormatter={formatValue} />
-              <Tooltip 
-                formatter={(value, name) => {
-                  const safeVal = (value === null || value === undefined || isNaN(value)) ? 0 : value;
-                  return [formatValue(safeVal), name];
-                }}
-              />
-              <Legend />
-              {multiSeries && seriesKeys.length > 0 ? (
-                seriesKeys.map((key, index) => (
-                  <Bar 
-                    key={key} 
-                    dataKey={key} 
-                    fill={colors[index % colors.length]} 
-                                         barSize={24}
-                     name={formatSeriesName(key)}
-                  />
-                ))
-              ) : (
-                <Bar dataKey={yAxisKey} fill={colors[0]} barSize={32} />
-              )}
-            </BarChart>
-          </ResponsiveContainer>
-        );
-
+  const renderChart = () => {
+    switch (chartType) {
       case 'line':
         return (
-          <ResponsiveContainer width="100%" height={fullscreenHeight}>
-            <LineChart {...commonProps}>
-              <CartesianGrid strokeDasharray="3 3" />
-              <XAxis dataKey={xAxisKey} />
-              <YAxis domain={yDomain || ['auto', 'auto']} tickFormatter={formatValue} />
-              <Tooltip 
-                formatter={(value, name) => {
-                  const safeVal = (value === null || value === undefined || isNaN(value)) ? 0 : value;
-                  return [formatValue(safeVal), name];
-                }}
+          <LineChart data={data}>
+            {showGrid && <CartesianGrid strokeDasharray="3 3" stroke="#2a2a2a" />}
+            <XAxis dataKey={xAxisKey} stroke="#808080" />
+            <YAxis tickFormatter={formatValue} stroke="#808080" />
+            {showTooltip && <Tooltip formatter={formatValue} contentStyle={{ background: '#1a1a1a', border: '1px solid #2a2a2a' }} />}
+            {showLegend && <Legend />}
+            {multiSeries ? (
+              seriesKeys.map((key, index) => (
+                <Line
+                  key={key}
+                  type="monotone"
+                  dataKey={key}
+                  stroke={colors[index % colors.length]}
+                  strokeWidth={2}
+                  dot={{ r: 4 }}
+                  activeDot={{ r: 6 }}
+                />
+              ))
+            ) : (
+              <Line
+                type="monotone"
+                dataKey={yAxisKey}
+                stroke={colors[0]}
+                strokeWidth={2}
+                dot={{ r: 4 }}
+                activeDot={{ r: 6 }}
               />
-              <Legend />
-              {multiSeries && seriesKeys.length > 0 ? (
-                seriesKeys.map((key, index) => (
-                  <Line 
-                    key={key}
-                    type="monotone" 
-                    dataKey={key} 
-                    stroke={colors[index % colors.length]} 
-                                         strokeWidth={2}
-                     name={formatSeriesName(key)}
-                  />
-                ))
-              ) : (
-                <Line type="monotone" dataKey={yAxisKey} stroke={colors[0]} strokeWidth={2} />
-              )}
-            </LineChart>
-          </ResponsiveContainer>
+            )}
+          </LineChart>
         );
 
-      case 'pie':
+      case 'bar':
         return (
-          <ResponsiveContainer width="100%" height={fullscreenHeight}>
-            <PieChart>
-              <Pie
-                data={data}
-                cx="50%"
-                cy="50%"
-                labelLine={false}
-                label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
-                outerRadius={fullscreenHeight / 3}
-                fill="#8884d8"
+          <BarChart data={data}>
+            {showGrid && <CartesianGrid strokeDasharray="3 3" stroke="#2a2a2a" />}
+            <XAxis dataKey={xAxisKey} stroke="#808080" />
+            <YAxis tickFormatter={formatValue} stroke="#808080" />
+            {showTooltip && <Tooltip formatter={formatValue} contentStyle={{ background: '#1a1a1a', border: '1px solid #2a2a2a' }} />}
+            {showLegend && <Legend />}
+            {multiSeries ? (
+              seriesKeys.map((key, index) => (
+                <Bar
+                  key={key}
+                  dataKey={key}
+                  fill={colors[index % colors.length]}
+                  radius={[4, 4, 0, 0]}
+                />
+              ))
+            ) : (
+              <Bar
                 dataKey={yAxisKey}
-              >
-                {data.map((entry, index) => (
-                  <Cell key={`cell-${index}`} fill={colors[index % colors.length]} />
-                ))}
-              </Pie>
-              <Tooltip 
-                formatter={(value, name) => {
-                  const safeVal = (value === null || value === undefined || isNaN(value)) ? 0 : value;
-                  return [formatValue(safeVal), name];
-                }}
+                fill={colors[0]}
+                radius={[4, 4, 0, 0]}
               />
-            </PieChart>
-          </ResponsiveContainer>
+            )}
+          </BarChart>
         );
 
       case 'area':
         return (
-          <ResponsiveContainer width="100%" height={fullscreenHeight}>
-            <AreaChart {...commonProps}>
-              <CartesianGrid strokeDasharray="3 3" />
-              <XAxis dataKey={xAxisKey} />
-              <YAxis domain={yDomain || ['auto', 'auto']} tickFormatter={formatValue} />
-              <Tooltip 
-                formatter={(value, name) => {
-                  const safeVal = (value === null || value === undefined || isNaN(value)) ? 0 : value;
-                  return [formatValue(safeVal), name];
-                }}
+          <AreaChart data={data}>
+            {showGrid && <CartesianGrid strokeDasharray="3 3" stroke="#2a2a2a" />}
+            <XAxis dataKey={xAxisKey} stroke="#808080" />
+            <YAxis tickFormatter={formatValue} stroke="#808080" />
+            {showTooltip && <Tooltip formatter={formatValue} contentStyle={{ background: '#1a1a1a', border: '1px solid #2a2a2a' }} />}
+            {showLegend && <Legend />}
+            {multiSeries ? (
+              seriesKeys.map((key, index) => (
+                <Area
+                  key={key}
+                  type="monotone"
+                  dataKey={key}
+                  fill={colors[index % colors.length]}
+                  stroke={colors[index % colors.length]}
+                  fillOpacity={0.2}
+                />
+              ))
+            ) : (
+              <Area
+                type="monotone"
+                dataKey={yAxisKey}
+                fill={colors[0]}
+                stroke={colors[0]}
+                fillOpacity={0.2}
               />
-              <Legend />
-              {multiSeries && seriesKeys.length > 0 ? (
-                seriesKeys.map((key, index) => (
-                  <Area 
-                    key={key}
-                    type="monotone" 
-                    dataKey={key} 
-                    stroke={colors[index % colors.length]} 
-                    fill={colors[index % colors.length]} 
-                                         fillOpacity={0.3}
-                     name={formatSeriesName(key)}
-                  />
-                ))
-              ) : (
-                <Area type="monotone" dataKey={yAxisKey} stroke={colors[0]} fill={colors[0]} fillOpacity={0.3} />
-              )}
-            </AreaChart>
-          </ResponsiveContainer>
+            )}
+          </AreaChart>
         );
 
-      case 'radar':
+      case 'pie':
         return (
-          <ResponsiveContainer width="100%" height={fullscreenHeight}>
-            <RadarChart data={data}>
-              <PolarGrid />
-              <PolarAngleAxis dataKey={xAxisKey} />
-              <PolarRadiusAxis />
-              <Radar name={title} dataKey={yAxisKey} stroke={colors[0]} fill={colors[0]} fillOpacity={0.3} />
-              <Tooltip 
-                formatter={(value, name) => {
-                  const safeVal = (value === null || value === undefined || isNaN(value)) ? 0 : value;
-                  return [formatValue(safeVal), name];
-                }}
-              />
-            </RadarChart>
-          </ResponsiveContainer>
-        );
-
-      case 'scatter':
-        return (
-          <ResponsiveContainer width="100%" height={fullscreenHeight}>
-            <ScatterChart {...commonProps}>
-              <CartesianGrid strokeDasharray="3 3" />
-              <XAxis dataKey={xAxisKey} />
-              <YAxis domain={yDomain || ['auto', 'auto']} tickFormatter={formatValue} />
-              <Tooltip 
-                formatter={(value, name) => {
-                  const safeVal = (value === null || value === undefined || isNaN(value)) ? 0 : value;
-                  return [formatValue(safeVal), name];
-                }}
-              />
-              <Legend />
-              <Scatter dataKey={yAxisKey} fill={colors[0]} />
-            </ScatterChart>
-          </ResponsiveContainer>
+          <PieChart>
+            <Pie
+              data={data}
+              dataKey={yAxisKey}
+              nameKey={xAxisKey}
+              cx="50%"
+              cy="50%"
+              outerRadius={height * 0.35}
+              fill={colors[0]}
+            >
+              {data.map((entry, index) => (
+                <Cell key={entry.name} fill={colors[index % colors.length]} />
+              ))}
+            </Pie>
+            {showTooltip && <Tooltip formatter={formatValue} contentStyle={{ background: '#1a1a1a', border: '1px solid #2a2a2a' }} />}
+            {showLegend && <Legend />}
+          </PieChart>
         );
 
       default:
-        return (
-          <div className="chart-placeholder">
-            <div className="chart-placeholder-icon">❌</div>
-            <p>Tipo de gráfico não suportado</p>
-          </div>
-        );
+        return null;
     }
   };
 
-  const openFullscreen = () => {
-    setIsFullscreen(true);
-    document.body.style.overflow = 'hidden';
-  };
-
-  const closeFullscreen = () => {
-    setIsFullscreen(false);
-    document.body.style.overflow = 'auto';
-  };
-
-  const selectId = `chart-type-${(title || 'grafico').toString().replace(/\s+/g, '-').toLowerCase()}`;
-
   return (
-    <>
-      <div className="chart-container">
-        <div className="chart-header">
-          <div>
-            <h3 className="chart-title">{title}</h3>
-            {subtitle && <p className="chart-subtitle">{subtitle}</p>}
-          </div>
-          <div className="chart-controls chart-controls-right">
-            <div className="chart-type-selector">
-              <label htmlFor={selectId} className="sr-only">Tipo de gráfico</label>
-              <select
-                id={selectId}
-                className="chart-type-select"
-                value={activeChartType}
-                onChange={(e) => setActiveChartType(e.target.value)}
-              >
-                {chartTypes.map((type) => (
-                  <option key={type} value={type}>
-                    {chartTypeLabels[type] || type}
-                  </option>
-                ))}
-              </select>
-            </div>
-            {/* Botão de tela cheia */}
-            <button
-              className="chart-fullscreen-btn"
-              onClick={openFullscreen}
-              title="Abrir em tela cheia"
-            >
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7" />
-              </svg>
-            </button>
-          </div>
+    <div className="chart-viewer">
+      <div className="chart-header">
+        <div className="chart-title">
+          <h3>{title}</h3>
+          {subtitle && <p>{subtitle}</p>}
         </div>
-        <div className="chart-content">
-          {renderChart()}
+        <div className="chart-controls">
+          <div className="chart-type-buttons">
+            {chartTypes.map((type) => (
+              <button
+                key={type}
+                className={`chart-type-button ${chartType === type ? 'active' : ''}`}
+                onClick={() => setChartType(type)}
+              >
+                {getChartTypeLabel(type)}
+              </button>
+            ))}
+          </div>
+          <div className="chart-options">
+            <label>
+              <input
+                type="checkbox"
+                checked={showLegend}
+                onChange={(e) => setShowLegend(e.target.checked)}
+              />
+              Legenda
+            </label>
+            <label>
+              <input
+                type="checkbox"
+                checked={showGrid}
+                onChange={(e) => setShowGrid(e.target.checked)}
+              />
+              Grade
+            </label>
+            <label>
+              <input
+                type="checkbox"
+                checked={showTooltip}
+                onChange={(e) => setShowTooltip(e.target.checked)}
+              />
+              Tooltip
+            </label>
+          </div>
         </div>
       </div>
-
-      {/* Modal de tela cheia */}
-      {isFullscreen && (
-        <div className={`fullscreen-overlay ${isFullscreen ? 'active' : ''}`} onClick={closeFullscreen}>
-          <div className="fullscreen-content" onClick={(e) => e.stopPropagation()}>
-            <div className="fullscreen-header">
-              <div>
-                <h3 className="fullscreen-title">{title}</h3>
-                {subtitle && <p className="fullscreen-subtitle">{subtitle}</p>}
-              </div>
-              <button className="fullscreen-close" onClick={closeFullscreen}>
-                ✕
-              </button>
-            </div>
-            <div className="fullscreen-body">
-              <div className="chart-type-selector" style={{ marginBottom: '1rem' }}>
-                <select
-                  className="chart-type-select"
-                  value={activeChartType}
-                  onChange={(e) => setActiveChartType(e.target.value)}
-                >
-                  {chartTypes.map((type) => (
-                    <option key={type} value={type}>
-                      {chartTypeLabels[type] || type}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div className="fullscreen-chart">
-                {renderChart(600)}
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-    </>
+      <div className="chart-container" style={{ height }}>
+        <ResponsiveContainer width="100%" height="100%">
+          {renderChart()}
+        </ResponsiveContainer>
+      </div>
+    </div>
   );
 };
 

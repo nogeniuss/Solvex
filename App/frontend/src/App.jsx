@@ -1,38 +1,104 @@
-import React, { useState, useEffect } from 'react'
-import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom'
-import ErrorBoundary from './components/ErrorBoundary'
-import AuthForm from './components/AuthForm'
-import ResetPassword from './components/ResetPassword'
-import Dashboard from './components/Dashboard'
-import Categorias from './components/Categorias'
-import Despesas from './components/Despesas'
-import Receitas from './components/Receitas'
-import Investimentos from './components/Investimentos'
-import Relatorios from './components/Relatorios'
-import DRE from './components/DRE'
-import AnalyticsDashboard from './components/AnalyticsDashboard'
-import Metas from './components/Metas'
-import Conquistas from './components/Conquistas'
-import Configuracoes from './components/Configuracoes'
-import Sidebar from './components/Sidebar'
-import Importacao from './components/Importacao'
-import UpgradePlan from './components/UpgradePlan'
-import BillingPage from './components/BillingPage'
+import React, { useState, useEffect } from 'react';
+import { BrowserRouter as Router, Routes, Route, Navigate, useNavigate } from 'react-router-dom';
+import ErrorBoundary from './components/ErrorBoundary';
+import Sidebar from './components/Sidebar';
+import AuthForm from './components/AuthForm';
+import AnalyticsDashboard from './components/AnalyticsDashboard';
+import Dashboard from './components/Dashboard';
+import Despesas from './components/Despesas';
+import Receitas from './components/Receitas';
+import Investimentos from './components/Investimentos';
+import Metas from './components/Metas';
+import Categorias from './components/Categorias';
+import Relatorios from './components/Relatorios';
+import Conquistas from './components/Conquistas';
+import DRE from './components/DRE';
+import Importacao from './components/Importacao';
+import Configuracoes from './components/Configuracoes';
+import PaymentPage from './components/PaymentPage';
+import PaymentErrorBoundary from './components/PaymentErrorBoundary';
+import PaymentSuccess from './components/PaymentSuccess';
+import UpgradePlan from './components/UpgradePlan';
+import BillingPage from './components/BillingPage';
+import './App.css';
 
-function App() {
-  const [user, setUser] = useState(null)
-  const [loading, setLoading] = useState(true)
+// Componente para interceptar requisições
+function RequestInterceptor({ children }) {
+  const navigate = useNavigate();
 
   useEffect(() => {
-    // Verificar se há um token salvo
-    const token = localStorage.getItem('token')
+    const originalFetch = window.fetch;
+    window.fetch = async (...args) => {
+      const [url, config = {}] = args;
+
+      const token = localStorage.getItem('token');
+      if (token) {
+        config.headers = {
+          ...config.headers,
+          'Authorization': `Bearer ${token}`
+        };
+      }
+
+      try {
+        const response = await originalFetch(url, config);
+
+        if (response.status === 403) {
+          const data = await response.json();
+          if (data.payment_required) {
+            navigate('/payment');
+            throw new Error('Pagamento necessário');
+          }
+        }
+
+        if (response.status === 401) {
+          localStorage.removeItem('token');
+          navigate('/login');
+          throw new Error('Não autorizado');
+        }
+
+        return response;
+      } catch (error) {
+        throw error;
+      }
+    };
+
+    return () => {
+      window.fetch = originalFetch;
+    };
+  }, [navigate]);
+
+  return children;
+}
+
+function App() {
+  const [user, setUser] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  const handleLogin = (userData, token) => {
+    setUser(userData);
+    localStorage.setItem('token', token);
+  };
+
+  const handleLogout = () => {
+    setUser(null);
+    localStorage.removeItem('token');
+  };
+
+  const handlePaymentSuccess = () => {
+    const token = localStorage.getItem('token');
     if (token) {
-      // Verificar se o token ainda é válido
-      fetchUserData(token)
-    } else {
-      setLoading(false)
+      fetchUserData(token);
     }
-  }, [])
+  };
+
+  useEffect(() => {
+    const token = localStorage.getItem('token');
+    if (token) {
+      fetchUserData(token);
+    } else {
+      setLoading(false);
+    }
+  }, []);
 
   const fetchUserData = async (token) => {
     try {
@@ -40,128 +106,100 @@ function App() {
         headers: {
           'Authorization': `Bearer ${token}`
         }
-      })
+      });
 
       if (response.ok) {
-        const data = await response.json()
-        setUser(data.user)
+        const data = await response.json();
+        setUser(data.user);
       } else {
-        // Token inválido, remover do localStorage
-        localStorage.removeItem('token')
+        handleLogout();
       }
     } catch (error) {
-      console.error('Erro ao buscar dados do usuário:', error)
-      localStorage.removeItem('token')
+      console.error('Erro ao buscar dados do usuário:', error);
+      handleLogout();
     } finally {
-      setLoading(false)
+      setLoading(false);
     }
-  }
-
-  const handleLogin = (userData, token) => {
-    setUser(userData)
-    localStorage.setItem('token', token)
-  }
-
-  const handleLogout = () => {
-    setUser(null)
-    localStorage.removeItem('token')
-  }
+  };
 
   if (loading) {
-    return (
-      <div className="auth-container">
-        <div className="auth-card">
-          <h2>Carregando...</h2>
-        </div>
-      </div>
-    )
+    return <div>Carregando...</div>;
   }
 
   return (
-    <ErrorBoundary>
-      <Router>
-        <div className="App">
-          <Routes>
-            {/* Rota pública para redefinição de senha */}
-            <Route 
-              path="/reset-password" 
-              element={<ResetPassword />} 
-            />
-            
-            {/* Rota principal */}
-            <Route 
-              path="/*" 
-              element={
-                user ? (
-                  <MainApp user={user} onLogout={handleLogout} />
+    <Router>
+      <RequestInterceptor>
+        <ErrorBoundary>
+          <div className="app">
+            {user && <Sidebar />}
+            <div className={`main-content-wrapper ${user ? '' : 'no-sidebar'}`}>
+              <Routes>
+                {/* Rota de pagamento */}
+                <Route
+                  path="/payment"
+                  element={
+                    <PaymentErrorBoundary>
+                      <PaymentPage user={user} />
+                    </PaymentErrorBoundary>
+                  }
+                />
+
+                {/* Rota de login */}
+                <Route
+                  path="/login"
+                  element={
+                    user ? (
+                      <Navigate to="/dashboard" replace />
+                    ) : (
+                      (() => {
+                        const urlParams = new URLSearchParams(window.location.search);
+                        const paymentStatus = urlParams.get('payment');
+                        
+                        if (paymentStatus === 'success') {
+                          return <PaymentSuccess onPaymentSuccess={handlePaymentSuccess} />;
+                        }
+                        return <AuthForm onLogin={handleLogin} />;
+                      })()
+                    )
+                  }
+                />
+
+                {/* Rotas protegidas */}
+                {user ? (
+                  <>
+                    <Route path="/dashboard" element={<Dashboard />} />
+                    <Route path="/analytics" element={<AnalyticsDashboard />} />
+                    <Route path="/despesas" element={<Despesas />} />
+                    <Route path="/receitas" element={<Receitas />} />
+                    <Route path="/investimentos" element={<Investimentos />} />
+                    <Route path="/metas" element={<Metas />} />
+                    <Route path="/categorias" element={<Categorias />} />
+                    <Route path="/relatorios" element={<Relatorios />} />
+                    <Route path="/conquistas" element={<Conquistas />} />
+                    <Route path="/dre" element={<DRE />} />
+                    <Route path="/importacao" element={<Importacao />} />
+                    <Route path="/configuracoes" element={<Configuracoes />} />
+                    <Route path="/upgrade" element={<UpgradePlan />} />
+                    <Route path="/billing" element={<BillingPage />} />
+                  </>
                 ) : (
-                  <AuthForm onLogin={handleLogin} />
-                )
-              } 
-            />
-          </Routes>
-        </div>
-      </Router>
-    </ErrorBoundary>
-  )
+                  <Route path="*" element={<Navigate to="/login" replace />} />
+                )}
+
+                {/* Redirecionar para dashboard ou login */}
+                <Route
+                  path="/"
+                  element={
+                    <Navigate to={user ? "/dashboard" : "/login"} replace />
+                  }
+                />
+              </Routes>
+            </div>
+          </div>
+        </ErrorBoundary>
+      </RequestInterceptor>
+    </Router>
+  );
 }
 
-// Componente para a aplicação principal (quando logado)
-function MainApp({ user, onLogout }) {
-  const [activePage, setActivePage] = useState('dashboard')
-
-  const handlePageChange = (page) => {
-    setActivePage(page)
-  }
-
-  const renderPage = () => {
-    switch (activePage) {
-      case 'dashboard':
-        return <Dashboard />
-      case 'categorias':
-        return <Categorias />
-      case 'despesas':
-        return <Despesas />
-      case 'receitas':
-        return <Receitas />
-      case 'investimentos':
-        return <Investimentos />
-      case 'relatorios':
-        return <Relatorios />
-      case 'dre':
-        return <DRE />
-      case 'analytics':
-        return <AnalyticsDashboard />
-      case 'importacao':
-        return <Importacao />
-      case 'metas':
-        return <Metas />
-      case 'conquistas':
-        return <Conquistas />
-      case 'configuracoes':
-        return <Configuracoes />
-      case 'upgrade':
-        return <UpgradePlan user={user} onCancel={() => setActivePage('dashboard')} />
-      case 'billing':
-        return <BillingPage user={user} onCancel={() => setActivePage('dashboard')} />
-      default:
-        return <Dashboard />
-    }
-  }
-
-  return (
-    <>
-      <Sidebar 
-        activePage={activePage} 
-        onPageChange={handlePageChange} 
-        user={user} 
-        onLogout={onLogout}
-      />
-      <div className="main-content-wrapper">
-        {renderPage()}
-      </div>
-    </>
-  )
-}
-
-export default App 
+export default App; 

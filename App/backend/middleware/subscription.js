@@ -1,4 +1,4 @@
-const { query } = require('../database');
+const db = require('../database');
 const logger = require('../config/logger');
 
 /**
@@ -6,11 +6,14 @@ const logger = require('../config/logger');
  */
 const requireActiveSubscription = (requiredPlan = null) => {
   return async (req, res, next) => {
+    let connection;
     try {
       const userId = req.user.id;
       
+      connection = await db.getConnection();
+      
       // Buscar status da assinatura do usuário
-      const subscription = await query(`
+      const [subscriptions] = await connection.query(`
         SELECT 
           us.id,
           us.plan_id,
@@ -31,7 +34,7 @@ const requireActiveSubscription = (requiredPlan = null) => {
       `, [userId]);
 
       // Se não tem subscription, verificar se está em trial
-      if (subscription.length === 0) {
+      if (subscriptions.length === 0) {
         return res.status(403).json({
           error: 'Assinatura requerida',
           message: 'Esta funcionalidade requer uma assinatura ativa.',
@@ -40,7 +43,7 @@ const requireActiveSubscription = (requiredPlan = null) => {
         });
       }
 
-      const userSubscription = subscription[0];
+      const userSubscription = subscriptions[0];
       const now = new Date();
 
       // Verificar se a assinatura está ativa
@@ -135,6 +138,10 @@ const requireActiveSubscription = (requiredPlan = null) => {
         error: 'Erro interno',
         message: 'Erro ao verificar status da assinatura'
       });
+    } finally {
+      if (connection) {
+        connection.release();
+      }
     }
   };
 };
@@ -143,6 +150,7 @@ const requireActiveSubscription = (requiredPlan = null) => {
  * Middleware para verificar status de subscription sem bloquear
  */
 const checkSubscriptionStatus = async (req, res, next) => {
+  let connection;
   try {
     const userId = req.user?.id;
     
@@ -151,7 +159,8 @@ const checkSubscriptionStatus = async (req, res, next) => {
       return next();
     }
 
-    const subscription = await query(`
+    connection = await db.getConnection();
+    const [subscriptions] = await connection.query(`
       SELECT 
         us.plan_id,
         us.status,
@@ -164,8 +173,8 @@ const checkSubscriptionStatus = async (req, res, next) => {
       LIMIT 1
     `, [userId]);
 
-    if (subscription.length > 0) {
-      const sub = subscription[0];
+    if (subscriptions.length > 0) {
+      const sub = subscriptions[0];
       const now = new Date();
       const expiresAt = sub.current_period_end ? new Date(sub.current_period_end) : null;
       
@@ -192,6 +201,10 @@ const checkSubscriptionStatus = async (req, res, next) => {
     logger.error('Erro ao verificar status de subscription:', error);
     req.subscriptionInfo = null;
     next();
+  } finally {
+    if (connection) {
+      connection.release();
+    }
   }
 };
 
@@ -200,11 +213,13 @@ const checkSubscriptionStatus = async (req, res, next) => {
  */
 const allowTrialAccess = (trialDays = 7) => {
   return async (req, res, next) => {
+    let connection;
     try {
       const userId = req.user.id;
       
       // Verificar se usuário foi criado recentemente (dentro do período trial)
-      const user = await query(`
+      connection = await db.getConnection();
+      const [user] = await connection.query(`
         SELECT created_date, subscription_status 
         FROM users 
         WHERE id = ?
@@ -237,6 +252,10 @@ const allowTrialAccess = (trialDays = 7) => {
         error: 'Erro interno',
         message: 'Erro ao verificar período trial'
       });
+    } finally {
+      if (connection) {
+        connection.release();
+      }
     }
   };
 };
@@ -246,10 +265,12 @@ const allowTrialAccess = (trialDays = 7) => {
  */
 const requireFeature = (featureName) => {
   return async (req, res, next) => {
+    let connection;
     try {
       const userId = req.user.id;
       
-      const subscription = await query(`
+      connection = await db.getConnection();
+      const [subscription] = await connection.query(`
         SELECT sp.features, sp.id as plan_id
         FROM user_subscriptions us
         JOIN subscription_plans sp ON us.plan_id = sp.id
@@ -288,13 +309,81 @@ const requireFeature = (featureName) => {
         error: 'Erro interno',
         message: 'Erro ao verificar disponibilidade da funcionalidade'
       });
+    } finally {
+      if (connection) {
+        connection.release();
+      }
     }
   };
 };
+
+/**
+ * Middleware para verificar se o usuário tem pagamento ativo
+ */
+async function checkPaymentStatus(req, res, next) {
+  let connection;
+  try {
+    // Rotas públicas que não precisam de verificação
+    const publicRoutes = [
+      '/api/auth/login',
+      '/api/auth/register',
+      '/api/stripe/webhook',
+      '/api/stripe/create-checkout-session',
+      '/api/payment/status'
+    ];
+
+    // Não verificar rotas públicas
+    if (publicRoutes.includes(req.path)) {
+      return next();
+    }
+
+    const userId = req.user?.id;
+    if (!userId) {
+      return res.status(401).json({ error: 'Não autorizado' });
+    }
+
+    connection = await db.getConnection();
+    // Verificar status do pagamento
+    const [rows] = await connection.query(`
+      SELECT payment_status, subscription_status, subscription_ends_at
+      FROM users
+      WHERE id = ?
+    `, [userId]);
+
+    const user = rows[0];
+
+    // Se não tem status de pagamento ou assinatura, não está autorizado
+    if (!user || !user.payment_status || user.payment_status !== 'completed') {
+      return res.status(403).json({ 
+        error: 'Pagamento pendente',
+        payment_required: true
+      });
+    }
+
+    // Verificar se assinatura está ativa e não expirou
+    if (!user.subscription_status || user.subscription_status !== 'active' || 
+        (user.subscription_ends_at && new Date(user.subscription_ends_at) < new Date())) {
+      return res.status(403).json({ 
+        error: 'Assinatura expirada',
+        subscription_expired: true
+      });
+    }
+
+    next();
+  } catch (error) {
+    logger.error('Erro ao verificar status do pagamento:', error);
+    res.status(500).json({ error: 'Erro interno do servidor' });
+  } finally {
+    if (connection) {
+      connection.release();
+    }
+  }
+}
 
 module.exports = {
   requireActiveSubscription,
   checkSubscriptionStatus,
   allowTrialAccess,
-  requireFeature
+  requireFeature,
+  checkPaymentStatus
 }; 

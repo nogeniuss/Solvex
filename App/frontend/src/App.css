@@ -1,0 +1,34 @@
+.app {
+  display: flex;
+  min-height: 100vh;
+}
+
+.main-content-wrapper {
+  flex: 1;
+  margin-left: 280px;
+  padding: 2rem;
+  background: var(--bg-secondary);
+  min-height: 100vh;
+  transition: margin-left 0.3s ease;
+}
+
+.main-content-wrapper.no-sidebar {
+  margin-left: 0;
+}
+
+@media (max-width: 768px) {
+  .main-content-wrapper {
+    margin-left: 0;
+    padding: 1rem;
+  }
+
+  .sidebar {
+    position: fixed;
+    left: -280px;
+    transition: left 0.3s ease;
+  }
+
+  .sidebar.open {
+    left: 0;
+  }
+} 

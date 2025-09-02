@@ -3,6 +3,7 @@ const router = express.Router();
 const { query } = require('../database');
 const { authenticateToken } = require('./auth');
 const logger = require('../config/logger');
+const StripeService = require('../services/StripeService');
 
 // GET - Listar todos os planos ativos
 router.get('/', async (req, res) => {
@@ -176,7 +177,7 @@ router.post('/upgrade', authenticateToken, async (req, res) => {
 
     // Verificar se o plano existe
     const targetPlan = await query(`
-      SELECT id, id as plan_id, nome as name, valor as price
+      SELECT id, id as plan_id, nome as name, valor as price, stripe_price_id
       FROM subscription_plans 
       WHERE id = ? AND ativo = TRUE
     `, [planId]);
@@ -204,26 +205,12 @@ router.post('/upgrade', authenticateToken, async (req, res) => {
       });
     }
 
-    // Atualizar ou criar subscription
-    if (currentSubscription.length > 0) {
-      // Atualizar subscription existente
-      await query(`
-        UPDATE user_subscriptions 
-        SET plan_id = ?, updated_at = NOW()
-        WHERE id = ?
-      `, [planId, currentSubscription[0].id]);
-    } else {
-      // Criar nova subscription
-      await query(`
-        INSERT INTO user_subscriptions (user_id, plan_id, status, created_at, updated_at)
-        VALUES (?, ?, 'active', NOW(), NOW())
-      `, [userId, planId]);
-    }
+    // Criar sessão do Stripe Checkout
+    const session = await StripeService.createCheckoutSession(req.user, targetPlan[0].stripe_price_id);
 
     res.json({
       success: true,
-      message: `Upgrade para ${targetPlan[0].name} realizado com sucesso`,
-      newPlan: targetPlan[0]
+      checkoutUrl: session.url
     });
 
   } catch (error) {

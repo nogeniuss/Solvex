@@ -10,7 +10,9 @@
     "migrate": "node migrations/run-migrations.js",
     "migrate:status": "node migrations/run-migrations.js status",
     "migrate:run": "node migrations/run-migrations.js run",
-    "migrate:help": "node migrations/run-migrations.js help"
+    "migrate:help": "node migrations/run-migrations.js help",
+    "migrate:metrics": "node migrations/run-metrics-migration.js",
+    "migrate:payment-history": "node migrations/run-payment-history-migration.js"
   },
   "dependencies": {
     "@vonage/server-sdk": "^3.20.1",

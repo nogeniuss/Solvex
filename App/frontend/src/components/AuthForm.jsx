@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react'
 import PaymentPage from './PaymentPage'
 import PaymentErrorBoundary from './PaymentErrorBoundary'
+import { useNavigate } from 'react-router-dom';
 
 const AuthForm = ({ onLogin }) => {
   const [isLogin, setIsLogin] = useState(true)
@@ -22,6 +23,7 @@ const AuthForm = ({ onLogin }) => {
   const [fieldErrors, setFieldErrors] = useState({})
   const [touchedFields, setTouchedFields] = useState({})
   const [loginMethod, setLoginMethod] = useState('email')
+  const navigate = useNavigate();
 
   // Validação em tempo real
   useEffect(() => {
@@ -116,76 +118,53 @@ const AuthForm = ({ onLogin }) => {
   }
 
   const handleSubmit = async (e) => {
-    e.preventDefault()
-    setLoading(true)
-    setError('')
-    setSuccess('')
-
-    // Validar se há erros
-    if (Object.keys(fieldErrors).length > 0) {
-      setError('Por favor, corrija os erros nos campos')
-      setLoading(false)
-      return
-    }
+    e.preventDefault();
+    setError('');
+    setLoading(true);
 
     try {
-      const endpoint = isLogin ? '/api/auth/login' : '/api/auth/register'
-      
-      // Limpar telefone para envio
-      const cleanPhone = formData.telefone.replace(/\D/g, '')
-      
-      const payload = isLogin 
-        ? { 
-            [loginMethod]: loginMethod === 'telefone' ? cleanPhone : formData[loginMethod], 
-            senha: formData.senha 
-          }
-        : { 
-            nome: formData.nome, 
-            email: formData.email, 
-            telefone: cleanPhone, 
-            senha: formData.senha 
-          }
-
-      const response = await fetch(endpoint, {
+      const response = await fetch(`/api/auth/${isLogin ? 'login' : 'register'}`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
         },
-        body: JSON.stringify(payload)
-      })
+        body: JSON.stringify({ 
+          nome: formData.nome,
+          email: formData[loginMethod], 
+          senha: formData.senha,
+          telefone: formData.telefone
+        })
+      });
 
-      const data = await response.json()
+      const data = await response.json();
 
-      if (response.ok) {
-        if (isLogin) {
-          // Login - por enquanto ir direto (verificação depois)
-          onLogin(data.user, data.token)
-        } else {
-          // Cadastro realizado - redirecionar SEMPRE para pagamento
-          setRegisteredUser(data.user)
-          setShowPayment(true)
-          setSuccess('🎉 Conta criada com sucesso! Complete sua assinatura para acessar o sistema.')
-        }
-      } else {
-        // Tratar diferentes tipos de erro
-        if (response.status === 409) {
-          if (data.error.includes('Email')) {
-            setError('❌ Este email já está cadastrado. Tente fazer login ou use outro email.')
-          } else if (data.error.includes('Telefone')) {
-            setError('❌ Este telefone já está cadastrado. Tente fazer login ou use outro telefone.')
-          } else {
-            setError('❌ ' + data.error)
-          }
-        } else {
-          setError(data.error || 'Erro na autenticação')
-        }
+      if (!response.ok) {
+        throw new Error(data.error || 'Erro no servidor');
       }
-    } catch (error) {
-      setError('Erro de conexão. Tente novamente.')
+
+      if (isLogin) {
+        localStorage.setItem('token', data.token);
+        onLogin(data.user, data.token);
+        navigate('/dashboard');
+      } else {
+        // Salvar email no localStorage para uso posterior
+        localStorage.setItem('userEmail', formData[loginMethod]);
+        
+        // Após cadastro bem-sucedido, redirecionar para pagamento
+        navigate('/payment', { 
+          state: { 
+            email: formData[loginMethod],
+            userId: data.user.id 
+          }
+        });
+      }
+    } catch (err) {
+      console.error('Erro:', err);
+      setError(err.message);
     } finally {
-      setLoading(false)
+      setLoading(false);
     }
-  }
+  };
 
   const handleForgotPassword = async (e) => {
     e.preventDefault()
@@ -465,11 +444,14 @@ const AuthForm = ({ onLogin }) => {
           </p>
         </div>
 
+        {/* Mostrar erro apenas se estiver no login ou se for outro tipo de erro no cadastro */}
         {error && (
-          <div className="alert alert-danger">
-            <i className="fas fa-exclamation-circle"></i>
-            {error}
-          </div>
+          (isLogin || (!isLogin && !error.includes('tentativas de login'))) && (
+            <div className="alert alert-danger">
+              <i className="fas fa-exclamation-circle"></i>
+              {error}
+            </div>
+          )
         )}
 
         {success && (
